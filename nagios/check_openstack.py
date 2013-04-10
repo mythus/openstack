@@ -1,6 +1,7 @@
 #!/usr/bin/python
 
 from Crypto.Cipher import AES
+import socket
 import pynagios, time
 import random, hashlib, base64
 import httplib, datetime, string
@@ -17,6 +18,8 @@ class CheckOut(pynagios.Plugin):
 		
 		except CheckFail as detail:
 			return pynagios.Response(pynagios.CRITICAL, "Check failed: %s" % detail)
+		except socket.error as detail:
+			return pynagios.Response(pynagios.CRITICAL, "Please recheck ip addresses and ports: %s" % detail)
 	
 		response = self.response_for_value(result['timeSpent'], "%.3f s to do the check" %  result['timeSpent']) 	
 		
@@ -129,11 +132,10 @@ def checkRestApi(apiEndpoint, url, httpReq):
         conn.request( httpReq, url, params, headers )
         resp = conn.getresponse()
         stop = time.time()
-	print resp.read()
 
-	if resp.read():
+	try: 
 		respDict = json.loads( resp.read() )
-	else:
+	except ValueError:
 		respDict = {}
 
         if re.match(r'^2\d\d$', str(resp.status)):
@@ -141,7 +143,7 @@ def checkRestApi(apiEndpoint, url, httpReq):
                          'httpCode'  : resp.status,
                          'httpReason': resp.reason,
                          'timeSpent' : stop - start,
-			 'perfData'  : respDict
+			 'response'  : respDict
                          }
         else:
                 raise CheckFail({
@@ -162,88 +164,85 @@ Recheck token validity
 	httpReq = "GET"
 
 	result = checkRestApi(apiEndpoint, url, httpReq)
+	perfData = result['response']
+	print perfData
 	result['perfData'] = {
-				'tenants': len(result['perfData']['tenants'])
+				'tenants': len(perfData['tenants'])
 				}	
 	return result	
-#params = "notUsedInGet"	
-	#tokenid = "ksksks"
-	#tokenid = gettoken(force)
-	#headers  = {"X-Auth-Token": tokenid,}
-	#conn = httplib.HTTPConnection(apiEndpoint)
-	#start = time.time()
-	#conn.request("HEAD", "/v2.0/tokens/" + tokenid, params, headers)
-	#resp = conn.getresponse()
-	#stop = time.time()
-	#if re.match(r'^2\d\d$', str(resp.status)):
-#		return ({
-#			 'httpCode': resp.status,
-#                         'httpReason': resp.reason,
-#			 'timeSpent' : stop - start,
-#			 'perfData'  : {}
-#			}) 
-#	else:
-#		raise CheckFail({
-#				 'httpCode': resp.status,
-#				 'httpReason': resp.reason
-#				})
-		
 
 def checkNova(apiEndpoint):
 
-	params = "notUsedInGet"
-        tokenid = gettoken(force)
-	headers = {"X-Auth-Token": tokenid,}
-	conn = httplib.HTTPConnection(apiEndpoint)
-        start = time.time()
-        conn.request("GET", "/v2/" + tenantid + "/servers", params, headers)
-        resp = conn.getresponse()
-	respDict = json.loads(resp.read())
-	stop = time.time()
-	if re.match(r'^2\d\d$', str(resp.status)):
-                return ({
-			 'httpCode': resp.status,
-                         'httpReason': resp.reason,
-                         'timeSpent' : stop - start,
-                         'perfData'  : {
-					'instances' : len(respDict['servers']) 
-					} 
-			})
-        else:
-                raise CheckFail({
-				 'httpCode': resp.status,
-                                 'httpReason': resp.reason})
-
+        url = "/v2/" + tenantid + "/servers"
+	httpReq = "GET"
 	
-def checkGlance():
+	result = checkRestApi( apiEndpoint, url, httpReq )
+	perfData = result['response']
+	result['perfData'] = {
+				'instances' : len(perfData['servers'])
+				}
 
-        params = "notUsedInGet"
-        tokenid = gettoken(force)
-        headers = {"X-Auth-Token": tokenid,}
-        conn = httplib.HTTPConnection(apiEndpoint)
-        start = time.time()
-        conn.request("GET", "/v2/" + tenantid + "/servers", params, headers)
-        resp = conn.getresponse()
-        respDict = json.loads(resp.read())
-        stop = time.time()
-        if re.match(r'^2\d\d$', str(resp.status)):
-                return ({
-                         'httpCode': resp.status,
-                         'httpReason': resp.reason,
-                         'timeSpent' : stop - start,
-                         'perfData'  : {
-                                        'instances' : len(respDict['servers'])
-                                        }
-                        })
-        else:
-                raise CheckFail({
-                                 'httpCode': resp.status,
-                                 'httpReason': resp.reason})
-def checkCinder():
-	pass
+	return result
+	
+def checkGlance(apiEndpoint):
 
-def checkQuantum():
-	pass
+	url = "/v2/images"
+        httpReq = "GET"
+
+        result = checkRestApi( apiEndpoint, url, httpReq )
+        perfData = result['response']
+        result['perfData'] = {
+                                'images' : len(perfData['images'])
+                                }
+
+        return result
+
+def checkCinder(apiEndpoint):
+	
+	url = "/v1/" + tenantid + "/volumes"
+        httpReq = "GET"
+
+        result = checkRestApi( apiEndpoint, url, httpReq )
+        perfData = result['response']
+	volsAttached = 0
+	for i in perfData['volumes']:
+		if not len(i['attachments']) == 0:
+			volsAttached += 1
+		
+        result['perfData'] = {
+                                'vols' : len(perfData['volumes']),
+				'volsAttached' : volsAttached
+                                }
+
+        return result
+
+def checkQuantum(apiEndpoint):
+	
+        httpReq = "GET"
+
+	url = "/v2.0/networks"
+	result = checkRestApi( apiEndpoint, url, httpReq )
+        perfDataNets = checkRestApi( apiEndpoint, url, httpReq )['response']
+	timeSpentNets = result['timeSpent']
+        
+	url = "/v2.0/subnets"
+	result = checkRestApi( apiEndpoint, url, httpReq )
+	perfDataSubnets = result['response']
+	timeSpentSubnets = result['timeSpent']
+
+	url = "/v2.0/ports"
+        result = checkRestApi( apiEndpoint, url, httpReq )
+       
+	 
+	perfData = result['response']
+	result['timeSpent'] += timeSpentNets + timeSpentSubnets
+        result['perfData'] = {
+				'networks' : len(perfDataNets['networks']),
+				'subnets'  : len(perfDataSubnets['subnets']),
+                                'ports'    : len(perfData['ports'])
+                                }
+
+        return result
 
 if __name__ == '__main__':
 	
@@ -257,14 +256,14 @@ if __name__ == '__main__':
 				help="""force re-authentication and generation of new token. By default new token is requested 
                                    at script start and saved encrypted in the /tmp/ostokenfile to be used until it expires""")
         parseArgs.add_argument("--keystone-api", metavar="<ip address>:<port>", type=str, required=True,
-				help="Openstack admin API used for rquesting a token")
+				help="Openstack admin API used for rquesting a token. If port not specified default 5000 is used.")
 	
 	parseGroup = parseArgs.add_mutually_exclusive_group(required=True)
 	parseGroup.add_argument("--check-keystone", action="store_true", help="Check Keystone API by validating or requesitng a tokenid.")
-	parseGroup.add_argument("--check-nova", metavar="<ip address>:<port>" ,type=str, help="Check Nova service by listing all deployed instances in the tenant. Number of instances is returned as performance data.")
-	parseGroup.add_argument("--check-glance", metavar="<ip address>:<port>", type=str, help="Check Glance service by listing  uploaded images in the tenant. NUmber of images is returned as performance data.")
-	parseGroup.add_argument("--check-cinder", metavar="<ip address>:<port>", type=str, help="Check Cinder service by listing created volumes in the tenant. Number of Volumes is returned as performance data.")
-	parseGroup.add_argument("--check-quantum",metavar="<ip address>:<port>", type=str, help="Check Quantum service by listing all porst in the tenant. Number of ports is returned as performance data.")
+	parseGroup.add_argument("--check-nova", metavar="<ip address>:<port>" ,type=str, help="Check Nova service by listing all deployed instances in the tenant. Number of instances is returned as performance data. If port not specified default 8774 is used.")
+	parseGroup.add_argument("--check-glance", metavar="<ip address>:<port>", type=str, help="Check Glance service by listing  uploaded images in the tenant. NUmber of images is returned as performance data. If port not specified default 9292 is used.")
+	parseGroup.add_argument("--check-cinder", metavar="<ip address>:<port>", type=str, help="Check Cinder service by listing created volumes in the tenant. Number of Volumes is returned as performance data. If port not specified default 8776 is used.")
+	parseGroup.add_argument("--check-quantum",metavar="<ip address>:<port>", type=str, help="Check Quantum service by listing all porst in the tenant. Number of net, subnets and ports are returned as performance data. If port not specified default 9696 is used.")
 	
 	myargs , nagiosargs  = parseArgs.parse_known_args()
 
@@ -274,24 +273,44 @@ if __name__ == '__main__':
 
 	if myargs.force_newtoken:
 		force = True
-	tokenurl = myargs.keystone_api
 
+	if re.search(r':', myargs.keystone_api):
+		tokenurl = myargs.keystone_api
+	else:
+		tokenurl = myargs.keystone_api + ':5000'
+	
+	# Mutually exclusive services
 	if myargs.check_keystone:
 		checkFunc = checkKeystone
 		apiEndpoint = tokenurl
+
 	elif myargs.check_nova:
 		checkFunc = checkNova
-		apiEndpoint = myargs.check_nova
+		if re.search(r':', myargs.check_nova):
+			apiEndpoint = myargs.check_nova
+		else:
+			apiEndpoint = myargs.check_nova + ':8774'
+
 	elif myargs.check_glance:   
                 checkFunc = checkGlance
-		apiEndpoint = myargs.check_glance
+                if re.search(r':', myargs.check_glance):
+                        apiEndpoint = myargs.check_glance
+                else:
+                        apiEndpoint = myargs.check_glance + ':9292'
+
 	elif myargs.check_cinder:   
                 checkFunc = checkCinder
-		apiEndpoint = myargs.check_cinder
+                if re.search(r':', myargs.check_cinder):
+                        apiEndpoint = myargs.check_cinder
+                else:
+                        apiEndpoint = myargs.check_cinder + ':8776'
+
 	elif myargs.check_quantum:   
                 checkFunc = checkQuantum	
-		apiEndpoint = myargs.check_quantum
-	
+                if re.search(r':', myargs.check_quantum):
+                        apiEndpoint = myargs.check_quantum
+                else:
+                        apiEndpoint = myargs.check_quantum + ':9696'
 
         aespass   = 'Bira$Vurst'
         tokenfile = '/tmp/ostokenfile_' + username + '_' + tenantid
