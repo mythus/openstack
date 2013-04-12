@@ -30,7 +30,7 @@ class CheckCeph(pynagios.Plugin):
 		if healthStat != 'OK':
 			return pynagios.Response(pynagios.CRITICAL, "Ceph cluster degraded, status is: %s" % healthStat )
 		
-		# Always return write spedd in KB/s
+		# Always return write speed in KB/s
 		writeSpeed = int(writeSpeed)
 		if writeMetric == 'B':
 			writeSpeed = writeSpeed / 1024
