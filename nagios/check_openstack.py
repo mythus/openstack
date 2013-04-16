@@ -165,7 +165,6 @@ Recheck token validity
 
 	result = checkRestApi(apiEndpoint, url, httpReq)
 	perfData = result['response']
-	print perfData
 	result['perfData'] = {
 				'tenants': len(perfData['tenants'])
 				}	
