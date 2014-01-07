@@ -28,8 +28,8 @@ def firewallRules( action, cName, ipAddr, virtualMachine=[] ):
                 opts['addDelRuleFlag'] = '-D'
                 opts['addDelChainFlag']= '-X'
         else:
-                logging.error('No action specified - add or remove rules?')
-                sys.exit(1)
+                logging.error('No known action specified ' + action)
+                sys.exit(0)
 
 	cmdAddChain 	= '{iptables} {addDelChainFlag} {chain}'.format(**opts)
 	cmdChain1 	= '{iptables} {addDelRuleFlag} FORWARD -i tun0 -s {clientAddr}  -j {chain}'.format(**opts)
@@ -38,9 +38,10 @@ def firewallRules( action, cName, ipAddr, virtualMachine=[] ):
 	cmdRule1 	= '{iptables} {addDelRuleFlag} {chain} -s {vmAddrs} -j ACCEPT'.format(**opts)
 	cmdRule2	= '{iptables} {addDelRuleFlag} {chain} -d {vmAddrs} -j ACCEPT'.format(**opts)
 	actionArray 	= [cmdAddChain,cmdChain1,cmdChain2,cmdRule1,cmdRule2,cmdRuleEnd]
-	if action == 'delete':
+	if action == 'delete' or action == 'update':
 		actionArray.reverse()
 
+	logging.info( action + ' client ' + ipAddr)
 	for cmdIp in actionArray :
 		print cmdIp
 		try:
@@ -59,17 +60,21 @@ def firewallRules( action, cName, ipAddr, virtualMachine=[] ):
 
 
 if __name__ == '__main__':
+	
 	clientsAclFilePath='/root/clients.yaml'
-	logging.info('Adding rules for client: '  sys.argv[1:4])
-	action,ipAddr,cName = sys.argv[1:4]
-	try:        
-		with open(clientsAclFilePath,'r') as cAcl:
-               	 	allClientsAcl = yaml.load(cAcl)
-	except Exception as detail:
-		logging.exception('Failed to extract yaml from file: ' +  clientsAclFilePath )
-		sys.exit(1)
+        try:
+               with open(clientsAclFilePath,'r') as cAcl:
+                        allClientsAcl = yaml.load(cAcl)
+        except Exception as detail:
+                logging.exception('Failed to extract yaml from file: ' +  clientsAclFilePath )
+                sys.exit(1)
+
+	action,ipAddr = sys.argv[1:3]
+	cName = '-'.join(ipAddr.split('.'))
+        
 	if cName not in allClientsAcl:
-		logging.error('Common name of the user not specified in the yaml file: ' + clientsAclFilePath)
-		sys.exit(1)
+              	logging.error('Common name ' + cName + ' of the user not specified in the yaml file: ' + clientsAclFilePath)
+              	sys.exit(1)
+
 	firewallRules(action,cName,ipAddr,allClientsAcl[cName])
 
