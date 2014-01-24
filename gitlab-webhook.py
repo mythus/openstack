@@ -22,15 +22,22 @@ def r10kExec(servers,gitKey,pUser,branch):
         sshConn = paramiko.SSHClient()
         sshConn.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         pKey = paramiko.RSAKey.from_private_key_file(gitKey)
+	try:
+		if int(branch['after']) == 0:
+			delBranch = True
+	except ValueError:
+		delBranch = False
         for puppetMaster in serverList:
                 branch = branch['ref'].split('/')[-1]
                 try:
                         sshConn.connect(puppetMaster, username=pUser, pkey=pKey)
                         stdin, stdout, stderr = sshConn.exec_command(r10kCmd + ' ' + branch)
                         sshConnErr = stderr.read()
+			if delBranch:
+				logging.info('Deleteing environment: ' + branch)
+				continue
                         if sshConnErr:
-                               logging.error(sshConnErr)
-                               raise Exception('Error during deployment')
+				raise Exception('ErrorDeploy' + sshConnErr)
                 except Exception, e:
                         logging.exception('Error deploying environment ' + branch + ' for puppetMaster ' + puppetMaster )
                 else:
@@ -57,4 +64,3 @@ if __name__ == '__main__':
 		httpServer.serve_forever()
 	except Exception as e:
 		logging.exception('Web server had an error' + e )	
-
