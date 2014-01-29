@@ -3,6 +3,7 @@
 import tornado.ioloop
 import tornado.options
 import tornado.web
+import subprocess
 import yaml
 import logging
 import os
@@ -62,6 +63,92 @@ def addDelCcd(action, newData):
                 logging.error('No client CCD file with path ' + ccdPath)
     return newData.keys()
     
+def addDelCert(action, newData):
+    """
+    Add/revoke client certificate.
+    """
+    vpnEnv={
+        'EASY_RSA':           "/etc/openvpn/easy-rsa",
+        'OPENSSL':            "openssl",
+        'GREP':               "grep",
+        'KEY_CONFIG':         "/etc/openvpn/easy-rsa/openssl.cnf",
+        'KEY_DIR':            "/etc/openvpn/easy-rsa/keys",
+        'KEY_SIZE':           "2048",
+        'CA_EXPIRE':          "3650",
+        'KEY_EXPIRE':         "3650",
+        'KEY_COUNTRY':        "BG",
+        'KEY_PROVINCE':       "SF",
+        'KEY_CITY':           "Sofia",
+        'KEY_ORG':            "Telerik",
+        'KEY_EMAIL':          "admin@telerik.com",
+        'KEY_OU':             'IT'
+    }
+    if action == 'add':
+        for cName in newData:
+            cmd = ['/etc/openvpn/easy-rsa/pkitool', cName]
+            try:
+                pkiCmd = subprocess.Popen(cmd ,
+                                  env = vpnEnv,
+                                  stdout=subprocess.PIPE,
+                                  stderr=subprocess.PIPE)
+                pkiOut, pkiErr = pkiCmd.communicate()
+                print pkiErr,pkiOut
+            except Exception as detail:
+                logging.exception('Error with PKITOOL ')
+            logging.info('Created certificates for ' + cName)
+    elif action == 'del':
+        for cName in newData:
+            cmd = ['/etc/openvpn/easy-rsa/revoke-full',cName]
+            os.remove('/etc/openvpn/easy-rsa/keys/' + cName + '.csr')
+            os.remove('/etc/openvpn/easy-rsa/keys/' + cName + '.crt')
+            os.remove('/etc/openvpn/easy-rsa/keys/' + cName + '.key')
+            try:
+                pkiCmd = subprocess.Popen(cmd,
+                                env = vpnEnv,
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE)
+                pkiOut, pkiErr = pkiCmd.communicate()
+            except Exception as detail:
+                logging.exception('Error with REVOKE ')
+            logging.info('Deleted certificates from store and revoked it for ' + cName)
+
+def addDelProfile(action, data):
+    """
+    Generate the ovpn profile with needed certificates in it.
+    Put it at download directory.
+    """
+    template = '/etc/openvpn/template.ovpn'
+    profileDir = '/etc/openvpn/profiles/'
+    keyStore = '/etc/openvpn/easy-rsa/keys/'
+    if action == 'add':
+        for cName in data:
+            certFile = keyStore + cName + '.crt'
+            keyFile = keyStore + cName + '.key'
+            profileFile = profileDir + cName + '.ovpn'
+            with open(template, 'r') as t:
+                with open(profileFile, 'w') as p:
+                    for line in t.readlines():
+                        if '<cert>' in line:
+                            p.write(line)
+                            with open(certFile, 'r') as c:
+                                binLock = 0
+                                for cLine in c.readlines():
+                                    if 'BEGIN CERTIFICATE' in cLine:
+                                        binLock = 1
+                                    if binLock:
+                                        p.write(cLine)
+                        elif '<key>' in line:
+                            p.write(line)
+                            with open(keyFile, 'r') as k:
+                                p.writelines(k.readlines())
+                        else:
+                            p.write(line)
+            logging.info('Openvpn profile file create for ' + cName)
+    elif action == 'del':
+        for cName in data:
+            os.remove(profileDir + cName + '.ovpn')
+            logging.info('Openvpn profile file deleted for ' + cName)
+
 class AddClientVPN(tornado.web.RequestHandler):
     def post(self):
         self.data = yaml.load(self.request.body)
@@ -69,6 +156,8 @@ class AddClientVPN(tornado.web.RequestHandler):
             assert isinstance(self.data[key], (list, tuple)), "We need list of ip addresses"
         addDelCcd('add', self.data)
         addDelData('add', self.data)
+        addDelCert('add', self.data)
+        addDelProfile('add', self.data)
         self.set_header("Content-Type", "text/plain")
         self.write( ' '.join(self.data.keys()) + ' added. May the force be with you!')
         logging.info('Adding completed for ' + ' '.join(self.data.keys()))
@@ -81,6 +170,8 @@ class DelClientVPN(tornado.web.RequestHandler):
         self.data = yaml.load(self.request.body)
         addDelCcd('del', self.data)
         addDelData('del', self.data)
+        addDelCert('del', self.data)
+        addDelProfile('del', self.data)
         self.set_header("Content-Type", "text/plain")
         self.write( ' '.join(self.data.keys()) + ' deleted. May the force be with you!')
         logging.info('Deleting completed for ' + ' '.join(self.data.keys()))
@@ -89,7 +180,7 @@ class DelClientVPN(tornado.web.RequestHandler):
         logging.error("Could not delete " + ' '.join(self.data.keys()))
 
 app = tornado.web.Application(handlers=[(r"/addclientvpn", AddClientVPN),
-                                        (r"/delclientvpn", DelClientVPN)
+                                        (r"/delclientvpn", DelClientVPN),
                                            ])
 
 if __name__ == "__main__":
